@@ -85,12 +85,14 @@ async function ensureUrl(url, type) {
   return await findUrl(url);
 }
 
-async function saveUrlResult(url_id, resultObj) {
+async function saveUrlResult(url_id, verdictText) {
   await pool.query(
-    `UPDATE url SET result=$1, updated_at=now() WHERE url_id=$2`,
-    [resultObj, url_id]
+    `UPDATE url SET result = $1, updated_at = now() WHERE url_id = $2`,
+    [verdictText, url_id]
   );
 }
+
+
 
 // ---- RabbitMQ ------------------------------------------------
 async function connectRabbitWithRetry() {
@@ -153,12 +155,24 @@ async function processTask(payload) {
   const row = await ensureUrl(url, type);
   let result = row?.result;
 
-  if (!result) {
-    result = (type === 'file')
-      ? await checkFile(String(url).replace(/^file:/, ''))
-      : await checkLink(url);
-    await saveUrlResult(row.url_id, result);
-  }
+// если запись уже есть и там лежит «толстый» объект — сузим до {verdict}
+if (result && result.verdict && Object.keys(result).length !== 1) {
+  const onlyVerdict = { verdict: result.verdict };
+  await saveUrlResult(row.url_id, verdictText);
+  result = onlyVerdict;
+}
+
+if (!result) {
+    const fullResult = (type === 'file')
+    ? await checkFile(String(url).replace(/^file:/, ''))
+    : await checkLink(url);
+
+    // Сохраняем только строку (например, "clean")
+    const verdictText = String(fullResult?.verdict ?? '');
+    await saveUrlResult(row.url_id, verdictText);
+    result = verdictText;
+
+}
 
   const text = (type === 'file')
     ? `Файл проверен: ${result.verdict}`
