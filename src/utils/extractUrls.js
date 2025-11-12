@@ -5,16 +5,19 @@ export function extractUrls(message) {
   if (message?.attachments && Array.isArray(message.attachments)) {
     message.attachments.forEach(attachment => {
       if (attachment.type === 'file' && attachment.payload?.url) {
-        // Добавляем URL файла в список
-        urls.push(attachment.payload.url);
+        // Добавляем URL файла в список с типом "file"
+        urls.push({ url: attachment.payload.url, type: 'file' });
       }
     });
   }
 
   // Также можно обработать обычные текстовые URL
   const textUrlPattern = /(https?:\/\/[^\s]+)/g;  // Паттерн для ссылок
-  const foundTextUrls = message.body.match(textUrlPattern) || [];
-  urls.push(...foundTextUrls);
+  const foundTextUrls = message.text.match(textUrlPattern) || [];
+  foundTextUrls.forEach(url => {
+    // Добавляем текстовые ссылки с типом "link"
+    urls.push({ url, type: 'link' });
+  });
 
   return urls;
 }

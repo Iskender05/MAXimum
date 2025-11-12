@@ -2,9 +2,10 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import { Bot } from '@maxhub/max-bot-api';
-import { findUrl, ensureUrl, saveUrlResult } from '../db/queries.js';
+import { findUrl, ensureUrl } from '../db/queries.js';
 import { publishToQueue } from '../queue/rabbit.js';
 import { extractUrls } from '../utils/extractUrls.js';
+import { query } from '../db/index.js';
 
 async function main() {
   const token = process.env.BOT_TOKEN;
@@ -25,31 +26,36 @@ async function main() {
 
   // Обработка команды /start
   bot.on('message_created', async (ctx) => {
-    console.log(ctx)
     const msg = ctx.update.message;
+    // console.log(msg);
 
     try {
-      const chatType = msg.chat?.type || 'personal'; // 'chat' for group, 'personal' for direct messages
+      const chatType = msg.recipient.chatType; // 'chat' for group, 'personal' for direct messages
       const urls = extractUrls(msg.body);
 
-      for (const url of urls) {
-        const { url_id, type } = await processUrl(url);
-        const userUrl = await handleUserUrl(ctx.message.user.id, url_id);
+      for (const { url, type } of urls) {  // деструктуризация для получения url и type
+        const url_id = await processUrl(url, type);  // передаем type в процессинг
+        if (chatType !== 'dialog') {
+          if (msg?.sender) {
+            await handleUserUrl(msg.sender.user_id, url_id)
+          }
+        }
 
         // отправляем в очередь на обработку
         await publishToQueue({
           message_id: msg.body.mid,
           url,
-          type,
-          chat: { type: chatType, id: msg.chat.id },
+          type,  // тип ссылки передаем в очередь
+          chat: { type: chatType, id: msg.recipient.chat_id },
         });
 
-        console.log(`[bot] URL processed: ${url}`);
+        console.log(`[bot] URL processed: ${url} with type: ${type}`);
       }
     } catch (e) {
       console.error('[bot] handler error:', e);
     }
   });
+
 
   await bot.start();
   console.log('[bot] started');
@@ -57,17 +63,18 @@ async function main() {
   setInterval(() => {}, 1 << 30); // keep process alive
 }
 
-async function processUrl(url) {
+async function processUrl(url, type) {
   const existingUrl = await findUrl(url);
   if (!existingUrl) {
-    // если не найдено, то добавляем в таблицу
-    return await ensureUrl(url, 'link');
+    // если не найдено, то добавляем в таблицу с типом
+    return await ensureUrl(url, type);
   }
   return existingUrl;
 }
 
 async function handleUserUrl(maxUserId, urlId) {
   const { rows } = await query('SELECT * FROM user_url WHERE max_user_id=$1 AND url_id=$2', [maxUserId, urlId]);
+  console.log(rows);
   if (rows.length === 0) {
     // если это первый раз, то создаём запись
     await query('INSERT INTO user_url(max_user_id, url_id, number) VALUES($1, $2, 1)', [maxUserId, urlId]);
