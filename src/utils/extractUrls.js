@@ -1,21 +1,34 @@
+// src/utils/extractUrls.js
 export function extractUrls(message) {
   const urls = [];
-  
-  // Проверяем вложения в сообщении
-  if (message?.attachments && Array.isArray(message.attachments)) {
-    message.attachments.forEach(attachment => {
-      if (attachment.type === 'file' && attachment.payload?.url) {
-        // Добавляем URL файла в список с типом "file"
-        urls.push({ url: attachment.payload.url, type: 'file' });
-      }
-    });
+
+  let text = '';
+
+  // 1. Если пришла строка — используем её как текст
+  if (typeof message === 'string') {
+    text = message;
+  }
+  // 2. Если объект (как msg.body) — берём text и attachments
+  else if (message && typeof message === 'object') {
+    text = message.text || '';
+
+    if (Array.isArray(message.attachments)) {
+      message.attachments.forEach((attachment) => {
+        if (attachment.type === 'file' && attachment.payload?.url) {
+          urls.push({ url: attachment.payload.url, type: 'file' });
+        }
+      });
+    }
+  } else {
+    // что-то странное прилетело — просто ничего не нашли
+    return [];
   }
 
-  // Также можно обработать обычные текстовые URL
-  const textUrlPattern = /(https?:\/\/[^\s]+)/g;  // Паттерн для ссылок
-  const foundTextUrls = message.text.match(textUrlPattern) || [];
-  foundTextUrls.forEach(url => {
-    // Добавляем текстовые ссылки с типом "link"
+  // 3. Ищем обычные текстовые ссылки
+  const textUrlPattern = /(https?:\/\/[^\s]+)/g;
+  const foundTextUrls = (text || '').match(textUrlPattern) || [];
+
+  foundTextUrls.forEach((url) => {
     urls.push({ url, type: 'link' });
   });
 
