@@ -27,29 +27,29 @@ async function main() {
   // Обработка команды /start
   bot.on('message_created', async (ctx) => {
     const msg = ctx.update.message;
-    // console.log(msg);
 
     try {
-      const chatType = msg.recipient.chatType; // 'chat' for group, 'personal' for direct messages
+      const chatType = msg.recipient.chat_type; // 'chat' for group, 'personal' for direct messages
       const urls = extractUrls(msg.body);
 
       for (const { url, type } of urls) {  // деструктуризация для получения url и type
-        const url_id = await processUrl(url, type);  // передаем type в процессинг
+        const url_from_db = await processUrl(url, type);  // передаем type в процессинг
         if (chatType !== 'dialog') {
           if (msg?.sender) {
-            await handleUserUrl(msg.sender.user_id, url_id)
+            await handleUserUrl(msg.sender.user_id, url_from_db['url_id'])
           }
         }
 
         // отправляем в очередь на обработку
-        await publishToQueue({
+        const json_to_queue = {
           message_id: msg.body.mid,
           url,
           type,  // тип ссылки передаем в очередь
           chat: { type: chatType, id: msg.recipient.chat_id },
-        });
+        };
+        await publishToQueue(json_to_queue);
 
-        console.log(`[bot] URL processed: ${url} with type: ${type}`);
+        console.log(`[bot] URL processed: ${json_to_queue}`);
       }
     } catch (e) {
       console.error('[bot] handler error:', e);
@@ -74,7 +74,6 @@ async function processUrl(url, type) {
 
 async function handleUserUrl(maxUserId, urlId) {
   const { rows } = await query('SELECT * FROM user_url WHERE max_user_id=$1 AND url_id=$2', [maxUserId, urlId]);
-  console.log(rows);
   if (rows.length === 0) {
     // если это первый раз, то создаём запись
     await query('INSERT INTO user_url(max_user_id, url_id, number) VALUES($1, $2, 1)', [maxUserId, urlId]);
