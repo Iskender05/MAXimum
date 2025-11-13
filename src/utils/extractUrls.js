@@ -1,36 +1,54 @@
 // src/utils/extractUrls.js
-export function extractUrls(message) {
+
+export function extractUrls(body) {
+  if (!body || typeof body !== "object") return [];
+
   const urls = [];
 
-  let text = '';
+  // ---------- 1. ФАЙЛЫ ИЗ ВЛОЖЕНИЙ ----------
+  const attachments = Array.isArray(body.attachments) ? body.attachments : [];
 
-  // 1. Если пришла строка — используем её как текст
-  if (typeof message === 'string') {
-    text = message;
-  }
-  // 2. Если объект (как msg.body) — берём text и attachments
-  else if (message && typeof message === 'object') {
-    text = message.text || '';
+  for (const att of attachments) {
+    if (!att || typeof att !== "object") continue;
 
-    if (Array.isArray(message.attachments)) {
-      message.attachments.forEach((attachment) => {
-        if (attachment.type === 'file' && attachment.payload?.url) {
-          urls.push({ url: attachment.payload.url, type: 'file' });
-        }
+    // Файл (тип "file")
+    if (att.type === "file" && att.payload) {
+      const fileId =
+        att.payload.id ??
+        att.payload.file_id ??
+        null;
+      const fileToken = att.payload.token ?? null;
+
+      if (fileId) {
+        urls.push({
+          type: "file",
+          url: `file:${fileId}`,      // условный идентификатор файла
+          file_id: fileId,
+          file_token: fileToken,
+        });
+      }
+    }
+
+    // Ссылка через attachment (если вдруг MAX так отдает)
+    if (att.type === "link" && att.payload?.url) {
+      urls.push({
+        type: "link",
+        url: att.payload.url,
       });
     }
-  } else {
-    // что-то странное прилетело — просто ничего не нашли
-    return [];
   }
 
-  // 3. Ищем обычные текстовые ссылки
-  const textUrlPattern = /(https?:\/\/[^\s]+)/g;
-  const foundTextUrls = (text || '').match(textUrlPattern) || [];
+  // ---------- 2. ТЕКСТОВЫЕ ССЫЛКИ ----------
+  const text = typeof body.text === "string" ? body.text : "";
+  const pattern = /(https?:\/\/[^\s]+)/gi;
+  const found = text.match(pattern) || [];
 
-  foundTextUrls.forEach((url) => {
-    urls.push({ url, type: 'link' });
-  });
+  for (const url of found) {
+    // не дублируем, если уже есть такая ссылка из attachment
+    if (!urls.some((u) => u.url === url)) {
+      urls.push({ type: "link", url });
+    }
+  }
 
   return urls;
 }

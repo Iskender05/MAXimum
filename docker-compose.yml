@@ -41,6 +41,9 @@ services:
       DATABASE_URL: postgres://appuser:apppass@db:5432/appdb
       AMQP_URL: amqp://rabbit:rabbit@rabbitmq:5672
       QUEUE_NAME: check
+      KASPERSKY_API_KEY: ${KASPERSKY_API_KEY}
+      KASPERSKY_URL_API: ${KASPERSKY_URL_API}
+      KASPERSKY_TIMEOUT_MS: ${KASPERSKY_TIMEOUT_MS}
     command: ["npm", "run", "start:bot"]
     restart: unless-stopped
 
@@ -57,6 +60,9 @@ services:
       DATABASE_URL: postgres://appuser:apppass@db:5432/appdb
       AMQP_URL: amqp://rabbit:rabbit@rabbitmq:5672
       QUEUE_NAME: check
+      KASPERSKY_API_KEY: ${KASPERSKY_API_KEY}
+      KASPERSKY_URL_API: ${KASPERSKY_URL_API}
+      KASPERSKY_TIMEOUT_MS: ${KASPERSKY_TIMEOUT_MS}
     command: ["npm", "run", "start:worker"]
     restart: unless-stopped
 
