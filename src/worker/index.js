@@ -5,7 +5,7 @@ dotenv.config();
 import amqplib from "amqplib";
 import { Bot } from "@maxhub/max-bot-api";
 import { findUrl, ensureUrl, saveUrlResult } from "../db/queries.js";
-import { checkUrlWithKaspersky } from "../services/kaspersky.js";
+import { checkUrlWithKaspersky, checkFileWithKaspersky } from "../services/kaspersky.js";
 
 
 const QUEUE_NAME = process.env.QUEUE_NAME || "check";
@@ -56,10 +56,51 @@ async function checkLink(url) {
 }
 
 
-async function checkFile(fileId, token) {
-  // заглушка; сюда можно прикрутить антивирус / MAX API
-  return { verdict: "no-malware" };
+async function checkFile(fileId, fileToken) {
+  try {
+    // 1) Скачиваем файл из MAX
+    const botInstance = await getBot();
+    const fileData = await botInstance.api.downloadFileByToken(fileToken);
+
+    if (!fileData) {
+      console.warn("[worker] cannot download file:", fileId);
+      return { verdict: "unknown" };
+    }
+
+    // 2) Приводим к Buffer
+    let fileBuffer;
+
+    if (Buffer.isBuffer(fileData)) {
+      fileBuffer = fileData;
+    } else if (fileData instanceof Uint8Array) {
+      fileBuffer = Buffer.from(fileData);
+    } else if (fileData && typeof fileData.arrayBuffer === "function") {
+      const ab = await fileData.arrayBuffer();
+      fileBuffer = Buffer.from(ab);
+    } else {
+      console.warn("[worker] unsupported fileData type:", typeof fileData);
+      return { verdict: "unknown" };
+    }
+
+    // 3) Проверяем файл в Kaspersky
+    const filename = `file_${fileId}`; // можно улучшить позже, если появится реальное имя
+    const res = await checkFileWithKaspersky(fileBuffer, filename);
+
+    console.log(
+      "[worker] Kaspersky file verdict:",
+      fileId,
+      "=>",
+      res.verdict,
+      `(${res.zone})`,
+    );
+
+    return res;
+  } catch (e) {
+    console.warn("[worker] file check error:", e.message);
+    return { verdict: "unknown" };
+  }
 }
+
 
 async function processTask(payload) {
   const { message_id, url, type, chat, file_id, file_token } = payload || {};
@@ -67,6 +108,12 @@ async function processTask(payload) {
   // 1) Валидация payload
   if (!message_id || !url || !type || !chat?.chat_id) {
     console.warn("[worker] skip bad payload:", payload);
+    return;
+  }
+
+    // Дополнительно: для файлов обязателен file_token
+  if (type === "file" && !file_token) {
+    console.warn("[worker] file task without file_token:", payload);
     return;
   }
 
@@ -83,7 +130,7 @@ async function processTask(payload) {
     // 4) Если нет — проверяем
     let res;
     if (type === "file") {
-      res = await checkFile(file_id, file_token);   // пока заглушка
+      res = await checkFile(file_id, file_token);   // теперь реальная проверка файла
     } else {
       res = await checkLink(url);                   // тут уже Kaspersky
     }

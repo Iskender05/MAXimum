@@ -41,9 +41,23 @@ async function main() {
     const sender = msg.sender || {};
 
     try {
-      const items = extractUrls(body);
+      const items = extractUrls(msg);
       if (!items.length) {
         return; // нет ни ссылок, ни файлов
+      }
+
+      // Один аккуратный ответ пользователю
+      if (items.length === 1) {
+        const { url, type } = items[0];
+        await ctx.reply(
+          type === "file"
+            ? "📁 Файл получен, начинаю проверку..."
+            : `🔍 Проверяю ссылку:\n${url}`,
+        );
+      } else {
+        await ctx.reply(
+          `🔍 Найдено ${items.length} объектов (ссылки/файлы), запускаю проверку...`,
+        );
       }
 
       const chatTypeRaw = recipient.chat_type; // 'dialog' | 'chat'
@@ -56,12 +70,6 @@ async function main() {
       for (const item of items) {
         const { url, type } = item;
 
-        // 1) мгновенный ответ пользователю
-        if (type === "file") {
-          await ctx.reply("📁 Файл получен, начинаю проверку...");
-        } else {
-          await ctx.reply(`🔍 Проверяю ссылку:\n${url}`);
-        }
 
         // 2) url в таблице url
         const urlRow = await processUrl(url, type);
