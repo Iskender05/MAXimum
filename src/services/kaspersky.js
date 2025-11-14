@@ -6,7 +6,7 @@ const URL_API =
   "https://opentip.kaspersky.com/api/v1/search/url";
 
 const API_KEY = process.env.KASPERSKY_API_KEY;
-const TIMEOUT_MS = Number(process.env.KASPERSKY_TIMEOUT_MS || 3000);
+const TIMEOUT_MS = Number(process.env.KASPERSKY_TIMEOUT_MS || 10000);
 
 /**
  * Простейшая обёртка над fetch с таймаутом.
