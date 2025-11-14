@@ -39,9 +39,13 @@ async function main() {
     const body = msg.body || {};
     const recipient = msg.recipient || {};
     const sender = msg.sender || {};
+    
 
     try {
-      const items = extractUrls(msg);
+      let items = extractUrls(msg.body);
+      if(msg?.link && msg.link.type === "forward"){
+        items = items.concat(extractUrls(msg.link.message));
+      }
       if (!items.length) {
         return; // нет ни ссылок, ни файлов
       }

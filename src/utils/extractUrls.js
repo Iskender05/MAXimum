@@ -1,25 +1,13 @@
 // src/utils/extractUrls.js
 
-export function extractUrls(message) {
-  if (!message || typeof message !== "object") return [];
+export function extractUrls(body) {
+  if (!body || typeof body !== "object") return [];
 
   const urls = [];
 
-  // --- тело сообщения (mid, text и т.п.) ---
-  const body = message.body && typeof message.body === "object"
-    ? message.body
-    : {};
-
-  // --- 1. attachments: и сверху, и внутри body ---
-  const topAttachments = Array.isArray(message.attachments)
-    ? message.attachments
-    : [];
-
-  const bodyAttachments = Array.isArray(body.attachments)
+  const attachments = Array.isArray(body.attachments)
     ? body.attachments
     : [];
-
-  const attachments = [...topAttachments, ...bodyAttachments];
 
   for (const att of attachments) {
     if (!att || typeof att !== "object") continue;
