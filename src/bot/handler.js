@@ -1,12 +1,10 @@
-// src/bot/handler.js
 import dotenv from "dotenv";
 dotenv.config();
 
 import { Bot } from "@maxhub/max-bot-api";
-import { findUrl, ensureUrl } from "../db/queries.js";
+import { processUrl, handleUserUrl } from "../db/queries.js";
 import { publishToQueue } from "../queue/rabbit.js";
 import { extractUrls } from "../utils/extractUrls.js";
-import { query } from "../db/index.js";
 
 async function main() {
   const token = process.env.BOT_TOKEN;
@@ -74,7 +72,6 @@ async function main() {
       for (const item of items) {
         const { url, type } = item;
 
-
         // 2) url в таблице url
         const urlRow = await processUrl(url, type);
 
@@ -107,37 +104,6 @@ async function main() {
 
   // чтобы процесс не завершился
   setInterval(() => {}, 1 << 30);
-}
-
-async function processUrl(url, type) {
-  const existing = await findUrl(url);
-  if (!existing) {
-    return await ensureUrl(url, type);
-  }
-  return existing;
-}
-
-async function handleUserUrl(maxUserId, urlId) {
-  const { rows } = await query(
-    "SELECT * FROM user_url WHERE max_user_id=$1 AND url_id=$2",
-    [maxUserId, urlId],
-  );
-
-  if (!rows.length) {
-    await query(
-      "INSERT INTO user_url(max_user_id, url_id, number) VALUES($1,$2,1)",
-      [maxUserId, urlId],
-    );
-    return 1;
-  } else {
-    const current = Number(rows[0].number || 0);
-    const next = current + 1;
-    await query(
-      "UPDATE user_url SET number=$1 WHERE max_user_id=$2 AND url_id=$3",
-      [next, maxUserId, urlId],
-    );
-    return next;
-  }
 }
 
 main().catch((err) => {
