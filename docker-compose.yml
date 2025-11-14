@@ -5,29 +5,35 @@ services:
       POSTGRES_DB: appdb
       POSTGRES_USER: appuser
       POSTGRES_PASSWORD: apppass
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb || exit 1"]
+      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
+    restart: unless-stopped
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
     environment:
       RABBITMQ_DEFAULT_USER: rabbit
       RABBITMQ_DEFAULT_PASS: rabbit
+      RABBITMQ_DEFAULT_VHOST: /
     ports:
       - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
       test: rabbitmq-diagnostics -q ping
       interval: 10s
       timeout: 30s
       retries: 5
-      start_period: 30s
+      start_period: 60s
+    restart: unless-stopped
 
   bot:
     build: .
@@ -38,13 +44,13 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      BOT_TOKEN: ${BOT_TOKEN}
+      BOT_TOKEN: ${BOT_TOKEN:?BOT_TOKEN is required}
       DATABASE_URL: postgres://appuser:apppass@db:5432/appdb
       AMQP_URL: amqp://rabbit:rabbit@rabbitmq:5672
       QUEUE_NAME: check
-      KASPERSKY_API_KEY: ${KASPERSKY_API_KEY}
-      KASPERSKY_URL_API: ${KASPERSKY_URL_API}
-      KASPERSKY_TIMEOUT_MS: ${KASPERSKY_TIMEOUT_MS}
+      KASPERSKY_API_KEY: ${KASPERSKY_API_KEY:?KASPERSKY_API_KEY is required}
+      KASPERSKY_URL_API: ${KASPERSKY_URL_API:-https://opentip.kaspersky.com/api/v1}
+      KASPERSKY_TIMEOUT_MS: ${KASPERSKY_TIMEOUT_MS:-10000}
     command: ["npm", "run", "start:bot"]
     restart: unless-stopped
 
@@ -57,15 +63,17 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      BOT_TOKEN: ${BOT_TOKEN}
+      BOT_TOKEN: ${BOT_TOKEN:?BOT_TOKEN is required}
       DATABASE_URL: postgres://appuser:apppass@db:5432/appdb
       AMQP_URL: amqp://rabbit:rabbit@rabbitmq:5672
       QUEUE_NAME: check
-      KASPERSKY_API_KEY: ${KASPERSKY_API_KEY}
-      KASPERSKY_URL_API: ${KASPERSKY_URL_API}
-      KASPERSKY_TIMEOUT_MS: ${KASPERSKY_TIMEOUT_MS}
+      KASPERSKY_API_KEY: ${KASPERSKY_API_KEY:?KASPERSKY_API_KEY is required}
+      KASPERSKY_URL_API: ${KASPERSKY_URL_API:-https://opentip.kaspersky.com/api/v1}
+      KASPERSKY_TIMEOUT_MS: ${KASPERSKY_TIMEOUT_MS:-10000}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-5}
     command: ["npm", "run", "start:worker"]
     restart: unless-stopped
 
 volumes:
   db_data:
+  rabbitmq_data:
