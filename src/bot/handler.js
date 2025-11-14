@@ -204,6 +204,53 @@ async function main() {
     }
   });
 
+  // при добавлении пользователя в группу
+  bot.on("user_added", async (ctx) => {
+    try {
+      const chatId = ctx.update.chat_id;
+      const user = ctx.update.user;
+      
+      // Пропускаем ботов
+      if (user.is_bot) return;
+
+      console.log(`[bot] user ${user.user_id} added to chat ${chatId}`);
+
+      // Проверяем пользователя по БД
+      const { rows } = await query(
+        `SELECT SUM(uu.number) as total_dangerous
+         FROM user_url uu
+         JOIN url u ON uu.url_id = u.url_id
+         WHERE uu.max_user_id = $1 
+           AND (
+             (u.type = 'link' AND u.result = 'malicious') OR 
+             (u.type = 'file' AND u.result = 'red')
+           )`,
+        [user.user_id]
+      );
+
+      const totalDangerous = parseInt(rows[0]?.total_dangerous) || 0;
+
+      // Отправляем сообщение в чат в зависимости от уровня опасности
+      let message = `✅ У пользователя ${user.first_name} (ID: ${user.user_id}) не было замечено никакой подозрительной активности.`;
+      if (totalDangerous > 5) {
+        message = `⚠️ Внимание! Добавлен опасный пользователь ${user.first_name} (ID: ${user.user_id}). Он часто скидывал вредоносные ссылки или файлы.`;
+        console.log(`[bot] Sent danger warning for user ${user.user_id} in chat ${chatId}`);
+      } else if (totalDangerous > 0) {
+        message = `🔍 Внимание! Добавлен подозрительный пользователь ${user.first_name} (ID: ${user.user_id}). У него бывали случаи отправки вредоносных ссылок или файлов.`;
+        console.log(`[bot] Sent suspicion warning for user ${user.user_id} in chat ${chatId}`);
+      } else {
+        console.log(`[bot] User ${user.user_id} is clean, no warning sent`);
+      }
+      await ctx.api.raw.post('messages', {
+        body: { text: message },
+        query: { chat_id: chatId }
+      });
+
+    } catch (error) {
+      console.error('[bot] Error in user_added handler:', error);
+    }
+  });
+
   await bot.start();
   console.log("[bot] started");
 
