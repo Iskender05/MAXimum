@@ -1,5 +1,3 @@
-// src/utils/extractUrls.js
-
 export function extractUrls(body) {
   if (!body || typeof body !== "object") return [];
 

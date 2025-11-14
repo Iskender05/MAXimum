@@ -49,8 +49,6 @@ services:
       AMQP_URL: amqp://rabbit:rabbit@rabbitmq:5672
       QUEUE_NAME: check
       KASPERSKY_API_KEY: ${KASPERSKY_API_KEY:?KASPERSKY_API_KEY is required}
-      KASPERSKY_URL_API: ${KASPERSKY_URL_API:-https://opentip.kaspersky.com/api/v1}
-      KASPERSKY_TIMEOUT_MS: ${KASPERSKY_TIMEOUT_MS:-10000}
     command: ["npm", "run", "start:bot"]
     restart: unless-stopped
 

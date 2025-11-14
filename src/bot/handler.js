@@ -2,9 +2,10 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import { Bot } from "@maxhub/max-bot-api";
-import { processUrl, handleUserUrl, getUserDangerousStats, getMultipleUsersDangerousStats } from "../db/queries.js";
+import { processUrl, handleUserUrl } from "../db/queries.js";
 import { publishToQueue } from "../queue/rabbit.js";
 import { extractUrls } from "../utils/extractUrls.js";
+import { query } from "../db/index.js";
 
 // Хранилище для отслеживания уже обработанных событий
 const processedEvents = new Set();
@@ -36,6 +37,7 @@ async function main() {
   // общий обработчик входящих сообщений
   bot.on("message_created", async (ctx) => {
     const msg = ctx.message;
+    console.log(msg);
     if (!msg) {
       console.warn("[bot] no message in ctx");
       return;
@@ -117,7 +119,7 @@ async function main() {
         console.log(`[bot] bot_added event for chat ${chatId} already processed, skipping`);
         return;
       }
-      
+  
       processedEvents.add(eventKey);
       console.log(`[bot] added to chat ${chatId}`);
 
@@ -151,20 +153,27 @@ async function main() {
       } while (marker);
 
       // 2) Проверяем всех пользователей по БД
-      const humanMembers = allMembers.filter(member => !member.is_bot);
-      const userIds = humanMembers.map(member => member.user_id);
-      
-      const dangerousStats = await getMultipleUsersDangerousStats(userIds);
-      const statsMap = new Map(
-        dangerousStats.map(stat => [stat.max_user_id, parseInt(stat.total_dangerous) || 0])
-      );
-
       let dangerousUsers = [];
       let suspiciousUsers = [];
 
-      for (const member of humanMembers) {
+      for (const member of allMembers) {
+        if (member.is_bot) continue;
+
         const userId = member.user_id;
-        const totalDangerous = statsMap.get(userId) || 0;
+        
+        const { rows } = await query(
+          `SELECT SUM(uu.number) as total_dangerous
+          FROM user_url uu
+          JOIN url u ON uu.url_id = u.url_id
+          WHERE uu.max_user_id = $1 
+            AND (
+              (u.type = 'link' AND u.result = 'malicious') OR 
+              (u.type = 'file' AND u.result = 'red')
+            )`,
+          [userId]
+        );
+
+        const totalDangerous = parseInt(rows[0]?.total_dangerous) || 0;
 
         if (totalDangerous > 5) {
           dangerousUsers.push({ name: member.first_name, id: userId });
@@ -174,20 +183,40 @@ async function main() {
       }
 
       // 3) Отправляем сообщения в чат
-      let message = "✅ Ни у одного пользователя из данной группы не было замечено случаев отправки вредоносных ссылок или файлов!";
       if (dangerousUsers.length > 0) {
-        message = "⚠️ Опасные пользователи в этой группе:\n\n";
+        let message = "⚠️ Опасные пользователи в этой группе:\n\n";
         dangerousUsers.forEach(user => {
           message += `• ${user.name} (ID: ${user.id}) - часто скидывал вредоносные ссылки или файлы\n`;
         });
-      } else if (suspiciousUsers.length > 0) {
-        message = "🔍 Подозрительные пользователи в этой группе:\n\n";
-        suspiciousUsers.forEach(user => {
-          message += `• ${user.name} (ID: ${user.id}) - бывали случаи отправки вредоносных ссылок или файлов\n`;
+        
+        console.log(message);
+        await ctx.api.raw.post('messages', {
+          body: { text: message },
+          query: { chat_id: chatId }
         });
       }
 
-      await ctx.reply(message);
+      if (suspiciousUsers.length > 0) {
+        let message = "🔍 Подозрительные пользователи в этой группе:\n\n";
+        suspiciousUsers.forEach(user => {
+          message += `• ${user.name} (ID: ${user.id}) - бывали случаи отправки вредоносных ссылок или файлов\n`;
+        });
+        
+        console.log(message);
+        await ctx.api.raw.post('messages', {
+          body: { text: message },
+          query: { chat_id: chatId }
+        });
+      }
+
+      if (suspiciousUsers.length + dangerousUsers.length === 0) {
+        let message = "✅ Ни у одного пользователя из данной группы не было замечено случаев отправки вредоносных ссылок или файлов!";
+        console.log(message);
+        await ctx.api.raw.post('messages', {
+          body: { text: message },
+          query: { chat_id: chatId }
+        });
+      }
 
       console.log(`[bot] Finished security check for chat ${chatId}. Found ${dangerousUsers.length} dangerous and ${suspiciousUsers.length} suspicious users`);
 
@@ -204,9 +233,8 @@ async function main() {
       
       // Пропускаем ботов
       if (user.is_bot) return;
-
       const eventKey = getEventKey(chatId, user.user_id);
-      
+
       // --------------------- Проверяем, не обрабатывали ли мы уже это событие ---------------------
       if (processedEvents.has(eventKey)) {
         console.log(`[bot] user_added event for user ${user.user_id} in chat ${chatId} already processed, skipping`);
@@ -222,8 +250,19 @@ async function main() {
       }, 10000);
 
       // Проверяем пользователя по БД
-      const stats = await getUserDangerousStats(user.user_id);
-      const totalDangerous = parseInt(stats?.total_dangerous) || 0;
+      const { rows } = await query(
+        `SELECT SUM(uu.number) as total_dangerous
+         FROM user_url uu
+         JOIN url u ON uu.url_id = u.url_id
+         WHERE uu.max_user_id = $1 
+           AND (
+             (u.type = 'link' AND u.result = 'malicious') OR 
+             (u.type = 'file' AND u.result = 'red')
+           )`,
+        [user.user_id]
+      );
+
+      const totalDangerous = parseInt(rows[0]?.total_dangerous) || 0;
 
       // Отправляем сообщение в чат в зависимости от уровня опасности
       let message = `✅ У пользователя ${user.first_name} (ID: ${user.user_id}) не было замечено никакой подозрительной активности.`;
@@ -236,8 +275,10 @@ async function main() {
       } else {
         console.log(`[bot] User ${user.user_id} is clean, no warning sent`);
       }
-      
-      await ctx.reply(message);
+      await ctx.api.raw.post('messages', {
+        body: { text: message },
+        query: { chat_id: chatId }
+      });
 
     } catch (error) {
       console.error('[bot] Error in user_added handler:', error);
