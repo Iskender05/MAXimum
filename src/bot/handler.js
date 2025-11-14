@@ -1,16 +1,49 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-import { Bot } from "@maxhub/max-bot-api";
+import { Bot, Keyboard } from "@maxhub/max-bot-api";
 import { processUrl, handleUserUrl, getUserDangerousStats, getMultipleUsersDangerousStats } from "../db/queries.js";
 import { publishToQueue } from "../queue/rabbit.js";
 import { extractUrls } from "../utils/extractUrls.js";
+import { advices, tests, testThemes } from "./securityData.js";
 
 // Хранилище для отслеживания уже обработанных событий
 const processedEvents = new Set();
 
 function getEventKey(chatId, userId = null) {
   return userId ? `user_${chatId}_${userId}` : `bot_${chatId}`;
+}
+
+const userStates = new Map();
+
+// === Клавиатуры ===
+
+// Меню
+function createMenuKeyboard() {
+  return Keyboard.inlineKeyboard([
+    [
+      Keyboard.button.callback('🧪 Пройти тест', 'choose_theme'),
+      Keyboard.button.callback('💡 Получить совет', 'get_advice')
+    ]
+  ]);
+}
+
+// Темы — по 1 в строке
+function createThemeKeyboard() {
+  const rows = testThemes.map((theme, i) => [
+    Keyboard.button.callback(theme.name, `start_test:${i}`)
+  ]);
+  rows.push([Keyboard.button.callback('Назад', 'back_to_menu', { intent: 'negative' })]);
+  return Keyboard.inlineKeyboard(rows);
+}
+
+// Варианты ответов — по 1 в строке
+function createQuestionKeyboard(options, qIndex) {
+  const rows = options.map((opt, idx) => [
+    Keyboard.button.callback(opt, `answer:${qIndex}:${idx}`)
+  ]);
+  rows.push([Keyboard.button.callback('❌ Отмена', 'cancel_test', { intent: 'negative' })]);
+  return Keyboard.inlineKeyboard(rows);
 }
 
 async function main() {
@@ -24,14 +57,13 @@ async function main() {
   const bot = new Bot(token);
 
   // при запуске бота
-  bot.on("bot_started", async (ctx) =>
+  bot.on("bot_started", async (ctx) => {
     ctx.reply(
-      "Привет! Я — бот, который помогает избегать переходов по вредным ссылкам и скачиванию файлов.\n\n" +
-      "Мой основной функционал — проверка ссылок и файлов на безопасность.\n\n" +
-      "Ты можешь добавить меня в свою группу для автоматической проверки или писать мне в личку.\n" +
-      "Будь уверен, что твоя безопасность в надёжных руках! 🚀",
-    ),
-  );
+      "Привет! Я MAX-Киберщит — твой надежный помощник в борьбе с киберугрозами!\n\nМоя главная задача — обезопасить тебя и твои беседы от вредоносных ссылок и подозрительных файлов.\n\nМой функционал:\n\n🔍 Проверка ссылок: Просто пришли мне любую ссылку, и я быстро её проанализирую.\n📎 Проверка файлов: Я проверяю файлы на наличие угроз, прежде чем ты их откроешь.\n👥 Защита группы: Добавь меня в чат или группу, и я автоматически начну проверять все сообщения.\n\nБудь уверен — твоя цифровая безопасность под надёжной защитой! 🚀",
+      { attachments: [createMenuKeyboard()] }
+    );
+    userStates.set(ctx.message.sender.user_id, { greeted: true });
+  });
 
   // общий обработчик входящих сообщений
   bot.on("message_created", async (ctx) => {
@@ -44,6 +76,14 @@ async function main() {
     const body = msg.body || {};
     const recipient = msg.recipient || {};
     const sender = msg.sender || {};
+
+    if (recipient.chat_type === 'dialog' && !userStates.has(sender.user_id)) {
+      await ctx.reply(
+        "Привет! Я MAX-Киберщит — твой надежный помощник в борьбе с киберугрозами!\n\nМоя главная задача — обезопасить тебя и твои беседы от вредоносных ссылок и подозрительных файлов.\n\nМой функционал:\n\n🔍 Проверка ссылок: Просто пришли мне любую ссылку, и я быстро её проанализирую.\n📎 Проверка файлов: Я проверяю файлы на наличие угроз, прежде чем ты их откроешь.\n👥 Защита группы: Добавь меня в чат или группу, и я автоматически начну проверять все сообщения.\n\nБудь уверен — твоя цифровая безопасность под надёжной защитой! 🚀",
+        { attachments: [createMenuKeyboard()] }
+      );
+      userStates.set(sender.user_id, { greeted: true });
+    }
     
 
     try {
@@ -242,6 +282,81 @@ async function main() {
     } catch (error) {
       console.error('[bot] Error in user_added handler:', error);
     }
+  });
+
+  // === Кнопки ===
+  bot.action('choose_theme', async (ctx) => {
+    await ctx.reply("Выберите тему теста:", { attachments: [createThemeKeyboard()] });
+  });
+
+  bot.action('back_to_menu', async (ctx) => {
+    await ctx.reply("Главное меню:", { attachments: [createMenuKeyboard()] });
+  });
+
+  bot.action('get_advice', async (ctx) => {
+    const advice = advices[Math.floor(Math.random() * advices.length)];
+    await ctx.reply(`💡 Совет по кибербезопасности:\n\n${advice}`, {
+      attachments: [createMenuKeyboard()]
+    });
+  });
+
+  // Запуск теста
+  bot.action(/start_test:(\d+)/, async (ctx) => {
+    const themeIndex = parseInt(ctx.match[1]);
+    const userId = ctx.message.sender.user_id;
+    const selectedTest = tests[themeIndex];
+
+    const state = {
+      test: selectedTest,
+      currentQuestion: 0,
+      score: 0,
+      theme: testThemes[themeIndex].name
+    };
+    userStates.set(userId, state);
+
+    const q = selectedTest[0];
+    await ctx.reply(`Тема: ${testThemes[themeIndex].name}\n\n1. ${q.q}`, {
+      attachments: [createQuestionKeyboard(q.o, 0)]
+    });
+  });
+
+  // Ответ
+  bot.action(/answer:(\d+):(\d+)/, async (ctx) => {
+    const userId = ctx.message.sender.user_id;
+    const state = userStates.get(userId);
+    if (!state) return;
+
+    const qIndex = parseInt(ctx.match[1]);
+    const ansIndex = parseInt(ctx.match[2]);
+    const currentQ = state.test[qIndex];
+    const isCorrect = ansIndex === currentQ.c;
+
+    if (isCorrect) {
+      await ctx.reply("✅ Правильно!");
+    } else {
+      await ctx.reply(`❌ Неправильно. Правильный ответ: ${currentQ.o[currentQ.c]}`);
+    }
+
+    state.score += isCorrect ? 1 : 0;
+    state.currentQuestion += 1;
+
+    if (state.currentQuestion < 5) {
+      const nextQ = state.test[state.currentQuestion];
+      await ctx.reply(`Следующий вопрос:\n${state.currentQuestion + 1}. ${nextQ.q}`, {
+        attachments: [createQuestionKeyboard(nextQ.o, state.currentQuestion)]
+      });
+    } else {
+      await ctx.reply(`Тест завершён!\nПравильных ответов: ${state.score} из 5`, {
+        attachments: [createMenuKeyboard()]
+      });
+      userStates.delete(userId);
+    }
+  });
+
+  bot.action('cancel_test', async (ctx) => {
+    const userId = ctx.message.sender.user_id;
+    userStates.delete(userId);
+    await ctx.reply("Тест отменён.", { attachments: [createMenuKeyboard()] });
   });
 
   await bot.start();
