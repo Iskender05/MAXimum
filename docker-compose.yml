@@ -7,6 +7,7 @@ services:
       POSTGRES_PASSWORD: apppass
     volumes:
       - db_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U appuser -d appdb || exit 1"]
       interval: 10s
@@ -41,6 +42,9 @@ services:
       DATABASE_URL: postgres://appuser:apppass@db:5432/appdb
       AMQP_URL: amqp://rabbit:rabbit@rabbitmq:5672
       QUEUE_NAME: check
+      KASPERSKY_API_KEY: ${KASPERSKY_API_KEY}
+      KASPERSKY_URL_API: ${KASPERSKY_URL_API}
+      KASPERSKY_TIMEOUT_MS: ${KASPERSKY_TIMEOUT_MS}
     command: ["npm", "run", "start:bot"]
     restart: unless-stopped
 
@@ -57,6 +61,9 @@ services:
       DATABASE_URL: postgres://appuser:apppass@db:5432/appdb
       AMQP_URL: amqp://rabbit:rabbit@rabbitmq:5672
       QUEUE_NAME: check
+      KASPERSKY_API_KEY: ${KASPERSKY_API_KEY}
+      KASPERSKY_URL_API: ${KASPERSKY_URL_API}
+      KASPERSKY_TIMEOUT_MS: ${KASPERSKY_TIMEOUT_MS}
     command: ["npm", "run", "start:worker"]
     restart: unless-stopped
 

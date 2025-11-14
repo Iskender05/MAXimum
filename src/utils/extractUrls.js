@@ -1,36 +1,66 @@
 // src/utils/extractUrls.js
-export function extractUrls(message) {
+
+export function extractUrls(body) {
+  if (!body || typeof body !== "object") return [];
+
   const urls = [];
 
-  let text = '';
+  const attachments = Array.isArray(body.attachments)
+    ? body.attachments
+    : [];
 
-  // 1. Если пришла строка — используем её как текст
-  if (typeof message === 'string') {
-    text = message;
-  }
-  // 2. Если объект (как msg.body) — берём text и attachments
-  else if (message && typeof message === 'object') {
-    text = message.text || '';
+  for (const att of attachments) {
+    if (!att || typeof att !== "object") continue;
 
-    if (Array.isArray(message.attachments)) {
-      message.attachments.forEach((attachment) => {
-        if (attachment.type === 'file' && attachment.payload?.url) {
-          urls.push({ url: attachment.payload.url, type: 'file' });
-        }
+    // файлы
+    if (att.type === "file" && att.payload) {
+      const fileId =
+        att.payload.id ??
+        att.payload.file_id ??
+        att.payload.fileId ??
+        null;
+
+      const fileToken =
+        att.payload.token ??
+        att.payload.file_token ??
+        att.payload.fileToken ??
+        null;
+
+      if (fileId) {
+        urls.push({
+          type: "file",
+          url: `file:${fileId}`,
+          file_id: fileId,
+          file_token: fileToken || null,
+        });
+      }
+    }
+
+    // ссылки через attachment (на всякий случай)
+    if (att.type === "link" && att.payload?.url) {
+      urls.push({
+        type: "link",
+        url: att.payload.url,
       });
     }
-  } else {
-    // что-то странное прилетело — просто ничего не нашли
-    return [];
   }
 
-  // 3. Ищем обычные текстовые ссылки
-  const textUrlPattern = /(https?:\/\/[^\s]+)/g;
-  const foundTextUrls = (text || '').match(textUrlPattern) || [];
+  // --- 2. текстовые ссылки ---
+  const text =
+    typeof body.text === "string"
+      ? body.text
+      : typeof message.text === "string"
+        ? message.text
+        : "";
 
-  foundTextUrls.forEach((url) => {
-    urls.push({ url, type: 'link' });
-  });
+  const pattern = /(https?:\/\/[^\s]+)/gi;
+  const found = text.match(pattern) || [];
+
+  for (const url of found) {
+    if (!urls.some((u) => u.url === url)) {
+      urls.push({ type: "link", url });
+    }
+  }
 
   return urls;
 }
