@@ -5,6 +5,7 @@ import { Bot } from "@maxhub/max-bot-api";
 import { processUrl, handleUserUrl } from "../db/queries.js";
 import { publishToQueue } from "../queue/rabbit.js";
 import { extractUrls } from "../utils/extractUrls.js";
+import { query } from "../db/index.js";
 
 async function main() {
   const token = process.env.BOT_TOKEN;
@@ -16,13 +17,13 @@ async function main() {
 
   const bot = new Bot(token);
 
-  // /start
-  bot.command("start", async (ctx) =>
+  // при запуске бота
+  bot.on("bot_started", async (ctx) =>
     ctx.reply(
       "Привет! Я — бот, который помогает избегать переходов по вредным ссылкам и скачиванию файлов.\n\n" +
-        "Мой основной функционал — проверка ссылок и файлов на безопасность.\n\n" +
-        "Ты можешь добавить меня в свою группу для автоматической проверки или писать мне в личку.\n" +
-        "Будь уверен, что твоя безопасность в надёжных руках! 🚀",
+      "Мой основной функционал — проверка ссылок и файлов на безопасность.\n\n" +
+      "Ты можешь добавить меня в свою группу для автоматической проверки или писать мне в личку.\n" +
+      "Будь уверен, что твоя безопасность в надёжных руках! 🚀",
     ),
   );
 
@@ -96,6 +97,109 @@ async function main() {
       }
     } catch (e) {
       console.error("[bot] handler error:", e);
+    }
+  });
+
+  // при добавлении бота в группу
+  bot.on("bot_added", async (ctx) => {
+    try {
+      const chatId = ctx.update.chat_id;
+      console.log(`[bot] added to chat ${chatId}`);
+
+      // 0) Отправляем общее приветственное сообщение
+      await ctx.api.raw.post('messages', {
+        body: { 
+          text: "👋 Привет! Я бот для проверки безопасности. Я буду автоматически проверять все ссылки и файлы в этом чате на вредоносность.\n\nЕсли обнаружу подозрительные материалы, я предупрежу участников." 
+        },
+        query: { chat_id: chatId }
+      });
+
+      // 1) Получаем список всех пользователей группы
+      let allMembers = [];
+      let marker = null;
+      
+      do {
+        const params = { count: 100 };
+        if (marker) params.marker = marker;
+        
+        const membersResponse = await ctx.api.raw.get(`chats/${chatId}/members`, {
+          query: params
+        });
+        
+        allMembers = allMembers.concat(membersResponse.members);
+        marker = membersResponse.marker;
+      } while (marker);
+
+      // 2) Проверяем всех пользователей по БД
+      let dangerousUsers = [];
+      let suspiciousUsers = [];
+
+      for (const member of allMembers) {
+        if (member.is_bot) continue;
+
+        const userId = member.user_id;
+        
+        const { rows } = await query(
+          `SELECT SUM(uu.number) as total_dangerous
+          FROM user_url uu
+          JOIN url u ON uu.url_id = u.url_id
+          WHERE uu.max_user_id = $1 
+            AND (
+              (u.type = 'link' AND u.result = 'malicious') OR 
+              (u.type = 'file' AND u.result = 'red')
+            )`,
+          [userId]
+        );
+
+        const totalDangerous = parseInt(rows[0]?.total_dangerous) || 0;
+
+        if (totalDangerous > 5) {
+          dangerousUsers.push({ name: member.first_name, id: userId });
+        } else if (totalDangerous > 0) {
+          suspiciousUsers.push({ name: member.first_name, id: userId });
+        }
+      }
+
+      // 3) Отправляем сообщения в чат
+      if (dangerousUsers.length > 0) {
+        let message = "⚠️ Опасные пользователи в этой группе:\n\n";
+        dangerousUsers.forEach(user => {
+          message += `• ${user.name} (ID: ${user.id}) - часто скидывал вредоносные ссылки или файлы\n`;
+        });
+        
+        console.log(message);
+        await ctx.api.raw.post('messages', {
+          body: { text: message },
+          query: { chat_id: chatId }
+        });
+      }
+
+      if (suspiciousUsers.length > 0) {
+        let message = "🔍 Подозрительные пользователи в этой группе:\n\n";
+        suspiciousUsers.forEach(user => {
+          message += `• ${user.name} (ID: ${user.id}) - бывали случаи отправки вредоносных ссылок или файлов\n`;
+        });
+        
+        console.log(message);
+        await ctx.api.raw.post('messages', {
+          body: { text: message },
+          query: { chat_id: chatId }
+        });
+      }
+
+      if (suspiciousUsers.length + dangerousUsers.length === 0) {
+        let message = "✅ Ни у одного пользователя из данной группы не было замечено случаев отправки вредоносных ссылок или файлов!";
+        console.log(message);
+        await ctx.api.raw.post('messages', {
+          body: { text: message },
+          query: { chat_id: chatId }
+        });
+      }
+
+      console.log(`[bot] Finished security check for chat ${chatId}. Found ${dangerousUsers.length} dangerous and ${suspiciousUsers.length} suspicious users`);
+
+    } catch (error) {
+      console.error('[bot] Error in bot_added handler:', error);
     }
   });
 
