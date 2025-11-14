@@ -1,5 +1,6 @@
 import { query } from './index.js';
 
+// Основные операции с URL
 export async function findUrl(url) {
   const { rows } = await query('SELECT * FROM url WHERE url=$1', [url]);
   return rows[0] || null;
@@ -32,6 +33,7 @@ export async function processUrl(url, type) {
   return existing;
 }
 
+// Операции с пользователями и URL
 export async function handleUserUrl(maxUserId, urlId) {
   const { rows } = await query(
     "SELECT * FROM user_url WHERE max_user_id=$1 AND url_id=$2",
@@ -53,4 +55,39 @@ export async function handleUserUrl(maxUserId, urlId) {
     );
     return next;
   }
+}
+
+// Запросы для анализа безопасности пользователей
+export async function getUserDangerousStats(userId) {
+  const { rows } = await query(
+    `SELECT SUM(uu.number) as total_dangerous
+     FROM user_url uu
+     JOIN url u ON uu.url_id = u.url_id
+     WHERE uu.max_user_id = $1 
+       AND (
+         (u.type = 'link' AND u.result = 'malicious') OR 
+         (u.type = 'file' AND u.result = 'red')
+       )`,
+    [userId]
+  );
+  return rows[0];
+}
+
+export async function getMultipleUsersDangerousStats(userIds) {
+  if (userIds.length === 0) return [];
+  
+  const placeholders = userIds.map((_, index) => `$${index + 1}`).join(',');
+  const { rows } = await query(
+    `SELECT uu.max_user_id, SUM(uu.number) as total_dangerous
+     FROM user_url uu
+     JOIN url u ON uu.url_id = u.url_id
+     WHERE uu.max_user_id IN (${placeholders})
+       AND (
+         (u.type = 'link' AND u.result = 'malicious') OR 
+         (u.type = 'file' AND u.result = 'red')
+       )
+     GROUP BY uu.max_user_id`,
+    userIds
+  );
+  return rows;
 }
