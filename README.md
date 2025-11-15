@@ -28,7 +28,7 @@ BOT_TOKEN=ваш_токен_бота
 DATABASE_URL=postgres://пользователь:пароль@хост:5432/имя_базы
 AMQP_URL=amqp://пользователь:пароль@rabbit:5672
 QUEUE_NAME=check
-KASPERSKY_API_KEY=ваш_api_ключ_kaspersky (доступене бесплатно при условии регистрации на https://opentip.kaspersky.com)
+KASPERSKY_API_KEY=ваш_api_ключ_kaspersky (доступен бесплатно при условии регистрации на https://opentip.kaspersky.com)
 KASPERSKY_URL_API=https://opentip.kaspersky.com/api/v1/search/domain
 KASPERSKY_TIMEOUT_MS=3000
 ```
